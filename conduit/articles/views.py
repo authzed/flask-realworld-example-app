@@ -3,6 +3,9 @@
 import datetime as dt
 
 from conduit.exceptions import InvalidUsage
+from conduit.namespace import Article as NSArticle
+from conduit.namespace import User as NSUser
+from conduit.namespace import authzed_client
 from conduit.user.models import User
 from flask import Blueprint, jsonify
 from flask_apispec import marshal_with, use_kwargs
@@ -79,6 +82,13 @@ def update_article(slug, **kwargs):
         raise InvalidUsage.article_not_found()
     article.update(updatedAt=dt.datetime.utcnow(), **kwargs)
     article.save()
+
+    ns_article = NSArticle(slug)
+    ns_author = NSUser(current_user.username)
+
+    with authzed_client().batch_write() as w:
+        w.create(ns_article.author(ns_author.as_authzed_user()))
+
     return article
 
 
@@ -197,11 +207,20 @@ def delete_comment_on_article(slug, cid):
 
 
 @blueprint.route("/api/articles/<slug>/comments/permission", methods=("GET",))
-@jwt_required
+# @jwt_required
 def permission(slug):
     article = Article.query.filter_by(slug=slug).first()
     if not article:
         raise InvalidUsage.article_not_found()
+
+    if current_user:
+        ns_article = NSArticle(slug)
+        ns_user = NSUser(current_user.username)
+        result = authzed_client().check(
+            ns_article.can_comment, ns_user.as_authzed_user()
+        )
+        if result.is_member:
+            return {"permission": "can_comment"}
 
     return {"permission": "can_comment"}
 
@@ -213,5 +232,14 @@ def grantPermission(slug, username=None):
     article = Article.query.filter_by(slug=slug).first()
     if not article:
         raise InvalidUsage.article_not_found()
+
+    if not username:
+        return {"msg": "No username provided"}
+
+    ns_article = NSArticle(slug)
+    ns_commenter = NSUser(username)
+
+    with authzed_client().batch_write() as w:
+        w.create(ns_article.can_comment(ns_commenter.as_authzed_user()))
 
     return {"msg": "Permission granted"}
