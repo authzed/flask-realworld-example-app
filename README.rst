@@ -1,5 +1,12 @@
 .. image:: image.png
 
+Authzed Demo
+------------
+
+This repo is forked from the `RealWorld sample apps <https://github.com/gothinkster/realworld>`_ and includes modifications that
+demonstrate adding permissions using Authzed.
+
+
 Quickstart
 ----------
 
