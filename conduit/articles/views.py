@@ -2,28 +2,43 @@
 
 import datetime as dt
 
+from conduit.exceptions import InvalidUsage
+from conduit.namespace import Article as NSArticle
+from conduit.namespace import User as NSUser
+from conduit.namespace import authzed_client
+from conduit.user.models import User
 from flask import Blueprint, jsonify
 from flask_apispec import marshal_with, use_kwargs
-from flask_jwt_extended import current_user, jwt_required, jwt_optional
+from flask_jwt_extended import current_user, jwt_optional, jwt_required
 from marshmallow import fields
 
-from conduit.exceptions import InvalidUsage
-from conduit.user.models import User
-from .models import Article, Tags, Comment
-from .serializers import (article_schema, articles_schema, comment_schema,
-                          comments_schema)
+from .models import Article, Comment, Tags
+from .serializers import (
+    article_schema,
+    articles_schema,
+    comment_schema,
+    comments_schema,
+)
 
-blueprint = Blueprint('articles', __name__)
+blueprint = Blueprint("articles", __name__)
 
 
 ##########
 # Articles
 ##########
 
-@blueprint.route('/api/articles', methods=('GET',))
+
+@blueprint.route("/api/articles", methods=("GET",))
 @jwt_optional
-@use_kwargs({'tag': fields.Str(), 'author': fields.Str(),
-             'favorited': fields.Str(), 'limit': fields.Int(), 'offset': fields.Int()})
+@use_kwargs(
+    {
+        "tag": fields.Str(),
+        "author": fields.Str(),
+        "favorited": fields.Str(),
+        "limit": fields.Int(),
+        "offset": fields.Int(),
+    }
+)
 @marshal_with(articles_schema)
 def get_articles(tag=None, author=None, favorited=None, limit=20, offset=0):
     res = Article.query
@@ -36,13 +51,14 @@ def get_articles(tag=None, author=None, favorited=None, limit=20, offset=0):
     return res.offset(offset).limit(limit).all()
 
 
-@blueprint.route('/api/articles', methods=('POST',))
+@blueprint.route("/api/articles", methods=("POST",))
 @jwt_required
 @use_kwargs(article_schema)
 @marshal_with(article_schema)
 def make_article(body, title, description, tagList=None):
-    article = Article(title=title, description=description, body=body,
-                      author=current_user.profile)
+    article = Article(
+        title=title, description=description, body=body, author=current_user.profile
+    )
     if tagList is not None:
         for tag in tagList:
             mtag = Tags.query.filter_by(tagname=tag).first()
@@ -54,28 +70,39 @@ def make_article(body, title, description, tagList=None):
     return article
 
 
-@blueprint.route('/api/articles/<slug>', methods=('PUT',))
+@blueprint.route("/api/articles/<slug>", methods=("PUT",))
 @jwt_required
 @use_kwargs(article_schema)
 @marshal_with(article_schema)
 def update_article(slug, **kwargs):
-    article = Article.query.filter_by(slug=slug, author_id=current_user.profile.id).first()
+    article = Article.query.filter_by(
+        slug=slug, author_id=current_user.profile.id
+    ).first()
     if not article:
         raise InvalidUsage.article_not_found()
     article.update(updatedAt=dt.datetime.utcnow(), **kwargs)
     article.save()
+
+    ns_article = NSArticle(slug)
+    ns_author = NSUser(current_user.username)
+
+    with authzed_client().batch_write() as w:
+        w.create(ns_article.author(ns_author.as_authzed_user()))
+
     return article
 
 
-@blueprint.route('/api/articles/<slug>', methods=('DELETE',))
+@blueprint.route("/api/articles/<slug>", methods=("DELETE",))
 @jwt_required
 def delete_article(slug):
-    article = Article.query.filter_by(slug=slug, author_id=current_user.profile.id).first()
+    article = Article.query.filter_by(
+        slug=slug, author_id=current_user.profile.id
+    ).first()
     article.delete()
-    return '', 200
+    return "", 200
 
 
-@blueprint.route('/api/articles/<slug>', methods=('GET',))
+@blueprint.route("/api/articles/<slug>", methods=("GET",))
 @jwt_optional
 @marshal_with(article_schema)
 def get_article(slug):
@@ -85,7 +112,7 @@ def get_article(slug):
     return article
 
 
-@blueprint.route('/api/articles/<slug>/favorite', methods=('POST',))
+@blueprint.route("/api/articles/<slug>/favorite", methods=("POST",))
 @jwt_required
 @marshal_with(article_schema)
 def favorite_an_article(slug):
@@ -98,7 +125,7 @@ def favorite_an_article(slug):
     return article
 
 
-@blueprint.route('/api/articles/<slug>/favorite', methods=('DELETE',))
+@blueprint.route("/api/articles/<slug>/favorite", methods=("DELETE",))
 @jwt_required
 @marshal_with(article_schema)
 def unfavorite_an_article(slug):
@@ -111,22 +138,28 @@ def unfavorite_an_article(slug):
     return article
 
 
-@blueprint.route('/api/articles/feed', methods=('GET',))
+@blueprint.route("/api/articles/feed", methods=("GET",))
 @jwt_required
-@use_kwargs({'limit': fields.Int(), 'offset': fields.Int()})
+@use_kwargs({"limit": fields.Int(), "offset": fields.Int()})
 @marshal_with(articles_schema)
 def articles_feed(limit=20, offset=0):
-    return Article.query.join(current_user.profile.follows). \
-        order_by(Article.createdAt.desc()).offset(offset).limit(limit).all()
+    return (
+        Article.query.join(current_user.profile.follows)
+        .order_by(Article.createdAt.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
 
 ######
 # Tags
 ######
 
-@blueprint.route('/api/tags', methods=('GET',))
+
+@blueprint.route("/api/tags", methods=("GET",))
 def get_tags():
-    return jsonify({'tags': [tag.tagname for tag in Tags.query.all()]})
+    return jsonify({"tags": [tag.tagname for tag in Tags.query.all()]})
 
 
 ##########
@@ -134,7 +167,7 @@ def get_tags():
 ##########
 
 
-@blueprint.route('/api/articles/<slug>/comments', methods=('GET',))
+@blueprint.route("/api/articles/<slug>/comments", methods=("GET",))
 @marshal_with(comments_schema)
 def get_comments(slug):
     article = Article.query.filter_by(slug=slug).first()
@@ -143,7 +176,7 @@ def get_comments(slug):
     return article.comments
 
 
-@blueprint.route('/api/articles/<slug>/comments', methods=('POST',))
+@blueprint.route("/api/articles/<slug>/comments", methods=("POST",))
 @jwt_required
 @use_kwargs(comment_schema)
 @marshal_with(comment_schema)
@@ -156,7 +189,7 @@ def make_comment_on_article(slug, body, **kwargs):
     return comment
 
 
-@blueprint.route('/api/articles/<slug>/comments/<cid>', methods=('DELETE',))
+@blueprint.route("/api/articles/<slug>/comments/<cid>", methods=("DELETE",))
 @jwt_required
 def delete_comment_on_article(slug, cid):
     article = Article.query.filter_by(slug=slug).first()
@@ -165,4 +198,48 @@ def delete_comment_on_article(slug, cid):
 
     comment = article.comments.filter_by(id=cid, author=current_user.profile).first()
     comment.delete()
-    return '', 200
+    return "", 200
+
+
+##########
+# Comments
+##########
+
+
+@blueprint.route("/api/articles/<slug>/comments/permission", methods=("GET",))
+# @jwt_required
+def permission(slug):
+    article = Article.query.filter_by(slug=slug).first()
+    if not article:
+        raise InvalidUsage.article_not_found()
+
+    if current_user:
+        ns_article = NSArticle(slug)
+        ns_user = NSUser(current_user.username)
+        result = authzed_client().check(
+            ns_article.can_comment, ns_user.as_authzed_user()
+        )
+        if result.is_member:
+            return {"permission": "can_comment"}
+
+    return {"permission": "can_comment"}
+
+
+@blueprint.route("/api/articles/<slug>/comments/permission", methods=("POST",))
+@use_kwargs({"username": fields.Str()})
+@jwt_required
+def grantPermission(slug, username=None):
+    article = Article.query.filter_by(slug=slug).first()
+    if not article:
+        raise InvalidUsage.article_not_found()
+
+    if not username:
+        return {"msg": "No username provided"}
+
+    ns_article = NSArticle(slug)
+    ns_commenter = NSUser(username)
+
+    with authzed_client().batch_write() as w:
+        w.create(ns_article.can_comment(ns_commenter.as_authzed_user()))
+
+    return {"msg": "Permission granted"}
